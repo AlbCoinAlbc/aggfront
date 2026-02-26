@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwapAggregator · Modular CSS</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app-container">
+
+    <div class="header-modern">
+        <div class="title-group">
+            <div class="logo-title">
+                <img src="icons/mixxchange.webp" alt="Mixxchange" class="title-logo">
+                <h1>aggregator</h1>
+            </div>
+            <span class="version-badge">v1.4</span>
+        </div>
+        <div class="exchanges-note">
+            ⚡ Pegasus · Exolix · FixedFloat · ETZ · Swapuz · Mixed · Xgram
+        </div>
+    </div>
+
+    <div class="swap-panel">
+        <div class="row">
+            <div class="col">
+                <label class="label">You send</label>
+                <select class="select" id="currencyFrom"></select>
+                <input class="input" type="number" id="amountFrom" value="0.01" step="any" placeholder="Amount">
+            </div>
+
+            <div class="swap-arrow" id="swapArrow" title="Swap currencies">⇅</div>
+
+            <div class="col">
+                <label class="label">You receive</label>
+                <select class="select" id="currencyTo"></select>
+                <input class="input" type="number" id="amountTo" placeholder="Estimate" readonly>
+            </div>
+        </div>
+
+        <div class="btn-container">
+            <button id="refreshRatesBtn" class="btn">🔍 Find best rates</button>
+        </div>
+
+        <div class="rate-box">
+            <span class="rate-label">🏆 Best rate</span>
+            <span class="rate-amount" id="bestRateDisplay">—</span>
+        </div>
+
+        <div class="providers-title">
+            <span>📊 Provider comparison</span>🟢Never KYC 🟡KYC only in rare cases ⚡Fast
+            <span style="font-size:0.8rem; color:#7088a3;">click card → swap</span>
+        </div>
+
+        <div class="providers" id="providerContainer">
+            <!-- Cards will be dynamically generated -->
+        </div>
+    </div>
+
+    <div class="footer-note">
+        ✅ Backend URL: <span id="backendUrlDisplay" class="inline-code">http://localhost:3001</span><br>
+        ⚙️ Edit <code class="inline-code">BACKEND_URL</code> in script if needed.
+    </div>
+</div>
+
+<script>
+    const BACKEND_URL = 'http://localhost:3001';
+    document.getElementById('backendUrlDisplay').innerText = BACKEND_URL;
+
+    const exchangeConfig = [
+        { id: 'pegasus', name: 'PegasusSwap', emoji: '🟢⚡', icon: 'icons/pegasus.webp', link: 'https://pegasusswap.com/?ref=B7J4583', fetchFunc: fetchPegasusRate, enabled: true },
+        { id: 'exolix', name: 'Exolix', emoji: '🟢', icon: 'icons/exolix.webp', link: 'https://exolix.com?ref=6A565BE6BD12206BD8289DF3541ECC38', fetchFunc: fetchExolixRate, enabled: true },
+        { id: 'fixedfloat', name: 'FixedFloat', emoji: '🟡⚡⚡', icon: 'icons/fixedfloat.webp', link: 'https://ff.io/?ref=myyf98ad', fetchFunc: fetchFixedFloatRate, enabled: true },
+        { id: 'etz', name: 'ETZ', emoji: '🟢⚡', icon: 'icons/etz.webp', link: 'https://etz-swap.com?ref=IL95CHDCNI7DUSWECCBX', fetchFunc: fetchETZRate, enabled: true },
+        { id: 'swapuz', name: 'Swapuz', emoji: '🟡⚡', icon: 'icons/swapuz.webp', link: 'https://swapuz.com/?ref=6b44f279-f1b4-4f77-b167-ae1099fec0e4', fetchFunc: fetchSwapuzRate, enabled: true },
+        { id: 'mixed', name: 'Mixed', emoji: '🟢', icon: 'icons/mixed.webp', link: 'https://mixed.exchange/?ref=nxrv33Upkz46', fetchFunc: fetchMixedRate, enabled: true },
+        { id: 'xgram', name: 'Xgram', emoji: '🟡', icon: 'icons/xgram.webp', link: 'https://xgram.io?refId=6996f9b9e189f', fetchFunc: fetchXgramRate, enabled: true }
+    ];
+
+    const enabledExchanges = exchangeConfig.filter(ex => ex.enabled);
+
+    function rebuildProviderCards() {
+        const container = document.getElementById('providerContainer');
+        container.innerHTML = '';
+        enabledExchanges.forEach(ex => {
+            const card = document.createElement('a');
+            card.className = 'provider-card';
+            card.id = `${ex.id}Card`;
+            card.href = ex.link;
+            card.target = '_blank';
+            card.rel = 'noopener';
+            card.innerHTML = `
+                <span class="provider-name">
+                    <img src="${ex.icon}" alt="${ex.name}" class="provider-icon">
+                    ${ex.name}${ex.emoji}
+                </span>
+                <span class="provider-rate" id="${ex.id}Rate">—</span>
+            `;
+            container.appendChild(card);
+        });
+    }
+
+    function setProviderRate(providerId, rateText, isError = false) {
+        const span = document.getElementById(`${providerId}Rate`);
+        if (span) {
+            span.innerText = rateText;
+            span.style.color = isError ? '#f28b82' : '#7cc5b5';
+        }
+    }
+
+    function sortProviders() {
+        const container = document.getElementById('providerContainer');
+        const cards = Array.from(container.children);
+        const rates = cards.map(card => {
+            const rateSpan = card.querySelector('.provider-rate');
+            const rateText = rateSpan.innerText;
+            const rate = parseFloat(rateText);
+            return { card, rate: isNaN(rate) ? -1 : rate };
+        });
+        rates.sort((a, b) => {
+            if (a.rate === -1 && b.rate === -1) return 0;
+            if (a.rate === -1) return 1;
+            if (b.rate === -1) return -1;
+            return b.rate - a.rate;
+        });
+        rates.forEach(item => container.appendChild(item.card));
+    }
+
+    async function fetchPegasusRate(fromVal, toVal, amount) {
+        const from = parseCoinOption(fromVal);
+        const to = parseCoinOption(toVal);
+        let url = `${BACKEND_URL}/api/pegasus/rate?from=${from.ticker}&to=${to.ticker}&amount=${amount}`;
+        if (from.network) url += `&networkFrom=${encodeURIComponent(from.network)}`;
+        if (to.network) url += `&networkTo=${encodeURIComponent(to.network)}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.error) throw new Error(data.message);
+            return { rate: data.receive, raw: data };
+        } catch (e) {
+            return { rate: null, error: e.message };
+        }
+    }
+    async function fetchExolixRate(fromVal, toVal, amount) {
+        const from = parseCoinOption(fromVal);
+        const to = parseCoinOption(toVal);
+        let url = `${BACKEND_URL}/api/exolix/rate?from=${from.ticker}&to=${to.ticker}&amount=${amount}`;
+        if (from.network) url += `&networkFrom=${encodeURIComponent(from.network)}`;
+        if (to.network) url += `&networkTo=${encodeURIComponent(to.network)}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.error) throw new Error(data.message);
+            return { rate: data.toAmount, raw: data };
+        } catch (e) {
+            return { rate: null, error: e.message };
+        }
+    }
+    async function fetchFixedFloatRate(fromVal, toVal, amount) {
+        const from = parseCoinOption(fromVal);
+        const to = parseCoinOption(toVal);
+        const body = {
+            fromCcy: from.ticker,
+            toCcy: to.ticker,
+            amount: parseFloat(amount)
+        };
+        try {
+            const res = await fetch(`${BACKEND_URL}/api/fixedfloat/price`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.message);
+            if (data.code === 0 && data.data && data.data.to) {
+                return { rate: data.data.to.amount, raw: data };
+            } else {
+                throw new Error(data.msg || 'Unknown error');
+            }
+        } catch (e) {
+            return { rate: null, error: e.message };
+        }
+    }
+    async function fetchETZRate(fromVal, toVal, amount) {
+        const from = parseCoinOption(fromVal);
+        const to = parseCoinOption(toVal);
+        let url = `${BACKEND_URL}/api/etz/rate?from=${from.ticker}&to=${to.ticker}&amount=${amount}&networkFrom=${encodeURIComponent(from.network)}&networkTo=${encodeURIComponent(to.network)}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.error) throw new Error(data.message);
+            if (data.data && typeof data.data.amountTo !== 'undefined') {
+                return { rate: data.data.amountTo, raw: data };
+            } else {
+                throw new Error('Unexpected response format');
+            }
+        } catch (e) {
+            return { rate: null, error: e.message };
+        }
+    }
+    async function fetchSwapuzRate(fromVal, toVal, amount) {
+        const from = parseCoinOption(fromVal);
+        const to = parseCoinOption(toVal);
+        let url = `${BACKEND_URL}/api/swapuz/rate?from=${from.ticker}&to=${to.ticker}&amount=${amount}&networkFrom=${encodeURIComponent(from.network)}&networkTo=${encodeURIComponent(to.network)}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.error) throw new Error(data.message);
+            if (data.result && typeof data.result.result !== 'undefined') {
+                return { rate: data.result.result, raw: data };
+            } else {
+                throw new Error('Unexpected response format');
+            }
+        } catch (e) {
+            return { rate: null, error: e.message };
+        }
+    }
+    async function fetchMixedRate(fromVal, toVal, amount) {
+        const from = parseCoinOption(fromVal);
+        const to = parseCoinOption(toVal);
+        let url = `${BACKEND_URL}/api/mixed/rate?from=${from.ticker}&to=${to.ticker}&amount=${amount}&networkFrom=${encodeURIComponent(from.network)}&networkTo=${encodeURIComponent(to.network)}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.error) throw new Error(data.message);
+            if (typeof data.toAmount !== 'undefined') {
+                return { rate: data.toAmount, raw: data };
+            } else {
+                throw new Error('Unexpected response format');
+            }
+        } catch (e) {
+            return { rate: null, error: e.message };
+        }
+    }
+    async function fetchXgramRate(fromVal, toVal, amount) {
+        const from = parseCoinOption(fromVal);
+        const to = parseCoinOption(toVal);
+        let url = `${BACKEND_URL}/api/xgram/rate?from=${from.ticker}&to=${to.ticker}&amount=${amount}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.error) throw new Error(data.message);
+            if (typeof data.toAmount !== 'undefined') {
+                return { rate: data.toAmount, raw: data };
+            } else {
+                throw new Error('Unexpected response format');
+            }
+        } catch (e) {
+            return { rate: null, error: e.message };
+        }
+    }
+
+    const coinList = [
+        { ticker: "BTC", network: "BTC", display: "BTC (Bitcoin)" },
+        { ticker: "ETH", network: "ETH", display: "ETH (Ethereum)" },
+        { ticker: "XMR", network: "XMR", display: "XMR (Monero)" },
+        { ticker: "ZEC", network: "ZEC", display: "ZEC (Zcash)" },
+        { ticker: "BNB", network: "BSC", display: "BNB (BSC)" },
+        { ticker: "SOL", network: "SOL", display: "SOL (Solana)" },
+        { ticker: "XRP", network: "XRP", display: "XRP (Ripple)" },
+        { ticker: "USDT", network: "ETH", display: "USDT (Ethereum)" },
+        { ticker: "USDC", network: "ETH", display: "USDC (Ethereum)" },
+        { ticker: "DOGE", network: "DOGE", display: "DOGE (Dogecoin)" },
+        { ticker: "LTC", network: "LTC", display: "LTC (Litecoin)" },
+        { ticker: "BCH", network: "BCH", display: "BCH (Bitcoin Cash)" },
+        { ticker: "AAVE", network: "ETH", display: "AAVE (Ethereum)" },
+        { ticker: "ADA", network: "ADA", display: "ADA (Cardano)" },
+        { ticker: "APT", network: "APT", display: "APT (Aptos)" },
+        { ticker: "ARB", network: "ARBITRUM", display: "ARB (Arbitrum)" },
+        { ticker: "ATOM", network: "ATOM", display: "ATOM (Cosmos)" },
+        { ticker: "AVAX", network: "AVAXC", display: "AVAX (C-Chain)" },
+        { ticker: "BAT", network: "ETH", display: "BAT (Ethereum)" },
+        { ticker: "BNB", network: "OPBNB", display: "BNB (opBNB)" },
+        { ticker: "BTC", network: "BSC", display: "BTC (BSC)" },
+        { ticker: "BTC", network: "LN", display: "BTC (Lightning)" },
+        { ticker: "DAI", network: "BSC", display: "DAI (BSC)" },
+        { ticker: "DAI", network: "ETH", display: "DAI (Ethereum)" },
+        { ticker: "DAI", network: "MATIC", display: "DAI (Polygon)" },
+        { ticker: "DASH", network: "DASH", display: "DASH (Dash)" },
+        { ticker: "DOT", network: "DOTAH", display: "DOT (Polkadot AH)" },
+        { ticker: "ETC", network: "ETC", display: "ETC (Ethereum Classic)" },
+        { ticker: "ETH", network: "ARBITRUM", display: "ETH (Arbitrum)" },
+        { ticker: "ETH", network: "BASE", display: "ETH (Base)" },
+        { ticker: "ETH", network: "BSC", display: "ETH (BSC)" },
+        { ticker: "ETH", network: "OP", display: "ETH (Optimism)" },
+        { ticker: "ETH", network: "ZKSYNC", display: "ETH (zkSync)" },
+        { ticker: "ETH", network: "MATIC", display: "WETH (Polygon)" },
+        { ticker: "LINK", network: "ETH", display: "LINK (Ethereum)" },
+        { ticker: "MANA", network: "ETH", display: "MANA (Ethereum)" },
+        { ticker: "PAXG", network: "ETH", display: "PAXG (Ethereum)" },
+        { ticker: "PEPE", network: "ETH", display: "PEPE (Ethereum)" },
+        { ticker: "POL", network: "MATIC", display: "POL (Polygon)" },
+        { ticker: "POL", network: "ETH", display: "POL (Ethereum)" },
+        { ticker: "SHIB", network: "ETH", display: "SHIB (Ethereum)" },
+        { ticker: "SHIB", network: "BSC", display: "SHIB (BSC)" },
+        { ticker: "SUI", network: "SUI", display: "SUI (Sui)" },
+        { ticker: "TON", network: "TON", display: "TON (Toncoin)" },
+        { ticker: "TRX", network: "TRX", display: "TRX (TRON)" },
+        { ticker: "TUSD", network: "ETH", display: "TUSD (Ethereum)" },
+        { ticker: "TWT", network: "BSC", display: "TWT (BSC)" },
+        { ticker: "USDC", network: "ARBITRUM", display: "USDC (Arbitrum)" },
+        { ticker: "USDC", network: "AVAXC", display: "USDC (Avalanche)" },
+        { ticker: "USDC", network: "BASE", display: "USDC (Base)" },
+        { ticker: "USDC", network: "BSC", display: "USDC (BSC)" },
+        { ticker: "USDC", network: "MATIC", display: "USDC (Polygon)" },
+        { ticker: "USDC", network: "OP", display: "USDC (Optimism)" },
+        { ticker: "USDC", network: "SOL", display: "USDC (Solana)" },
+        { ticker: "USDP", network: "ETH", display: "USDP (Ethereum)" },
+        { ticker: "USDT", network: "ARBITRUM", display: "USDT (Arbitrum)" },
+        { ticker: "USDT", network: "AVAXC", display: "USDT (Avalanche)" },
+        { ticker: "USDT", network: "BSC", display: "USDT (BSC)" },
+        { ticker: "USDT", network: "MATIC", display: "USDT (Polygon)" },
+        { ticker: "USDT", network: "SOL", display: "USDT (Solana)" },
+        { ticker: "USDT", network: "TRX", display: "USDT (TRC20)" },
+        { ticker: "VET", network: "VET", display: "VET (VeChain)" },
+        { ticker: "XLM", network: "XLM", display: "XLM (Stellar)" },
+        { ticker: "XTZ", network: "XTZ", display: "XTZ (Tezos)" },
+        { ticker: "ZRX", network: "ETH", display: "ZRX (Ethereum)" }
+    ];
+
+    function populateSelect(selectId) {
+        const select = document.getElementById(selectId);
+        coinList.forEach(coin => {
+            const option = document.createElement('option');
+            option.value = `${coin.ticker}|${coin.network}`;
+            option.textContent = coin.display;
+            select.appendChild(option);
+        });
+    }
+    populateSelect('currencyFrom');
+    populateSelect('currencyTo');
+
+    function setDefaultSelections() {
+        const fromSelect = document.getElementById('currencyFrom');
+        const toSelect = document.getElementById('currencyTo');
+        for (let i = 0; i < fromSelect.options.length; i++) {
+            if (fromSelect.options[i].value === 'BTC|BTC') {
+                fromSelect.selectedIndex = i;
+                break;
+            }
+        }
+        for (let i = 0; i < toSelect.options.length; i++) {
+            if (toSelect.options[i].value === 'XMR|XMR') {
+                toSelect.selectedIndex = i;
+                break;
+            }
+        }
+    }
+    setDefaultSelections();
+
+    function parseCoinOption(value) {
+        const [ticker, network] = value.split('|');
+        return { ticker, network };
+    }
+
+    document.getElementById('swapArrow').addEventListener('click', () => {
+        const fromSelect = document.getElementById('currencyFrom');
+        const toSelect = document.getElementById('currencyTo');
+        const fromVal = fromSelect.value;
+        const toVal = toSelect.value;
+        fromSelect.value = toVal;
+        toSelect.value = fromVal;
+    });
+
+    async function fetchAllRates() {
+        const fromVal = document.getElementById('currencyFrom').value;
+        const toVal = document.getElementById('currencyTo').value;
+        let amount = parseFloat(document.getElementById('amountFrom').value);
+        if (isNaN(amount) || amount <= 0) amount = 0.01;
+
+        const btn = document.getElementById('refreshRatesBtn');
+        btn.classList.add('loading');
+        btn.innerHTML = '⏳ Searching...';
+
+        enabledExchanges.forEach(ex => {
+            setProviderRate(ex.id, '⏳', false);
+        });
+        document.getElementById('bestRateDisplay').innerText = '—';
+        document.getElementById('amountTo').value = '';
+
+        const fetchPromises = enabledExchanges.map(ex => ex.fetchFunc(fromVal, toVal, amount));
+        const results = await Promise.allSettled(fetchPromises);
+
+        let idx = 0;
+        const rateObjects = [];
+        enabledExchanges.forEach(ex => {
+            const result = results[idx++];
+            let rate = null, error = null;
+            if (result.status === 'fulfilled' && result.value.rate !== null) {
+                rate = result.value.rate;
+            } else {
+                error = result.status === 'rejected' ? result.reason : (result.value?.error || 'error');
+            }
+            setProviderRate(ex.id, rate ? rate.toFixed(6) : `❌ ${error}`, !rate);
+            if (rate) rateObjects.push({ name: ex.name, rate });
+        });
+
+        sortProviders();
+
+        if (rateObjects.length > 0) {
+            const best = rateObjects.reduce((max, curr) => curr.rate > max.rate ? curr : max, rateObjects[0]);
+            document.getElementById('bestRateDisplay').innerText = `${best.rate.toFixed(6)} (${best.name})`;
+            document.getElementById('amountTo').value = best.rate.toFixed(6);
+        } else {
+            document.getElementById('bestRateDisplay').innerText = '— no rates —';
+        }
+
+        btn.classList.remove('loading');
+        btn.innerHTML = '🔍 Find best rates';
+    }
+
+    window.onload = function() {
+        rebuildProviderCards();
+        document.getElementById('refreshRatesBtn').addEventListener('click', fetchAllRates);
+        setTimeout(fetchAllRates, 100);
+    };
+</script>
+</body>
+</html>
